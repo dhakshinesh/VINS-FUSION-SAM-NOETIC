@@ -24,14 +24,9 @@ find_package(OpenCV 4 REQUIRED)
 
 find_package(Ceres REQUIRED)
 
-include_directories(${catkin_INCLUDE_DIRS} ${CERES_INCLUDE_DIRS})
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 find_package(Eigen3)
-include_directories(
-  ${catkin_INCLUDE_DIRS}
-  ${EIGEN3_INCLUDE_DIR}
-)
 
 # Generate services
 add_service_files(
@@ -48,6 +43,12 @@ generate_messages(
 
 catkin_package(
   CATKIN_DEPENDS roscpp std_msgs geometry_msgs nav_msgs tf cv_bridge camera_models image_transport sensor_msgs message_runtime
+)
+
+include_directories(
+  ${catkin_INCLUDE_DIRS}
+  ${CERES_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIR}
 )
 
 add_library(vins_lib
