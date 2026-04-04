@@ -14,6 +14,7 @@ Estimator::Estimator(): f_manager{Rs}
 {
     ROS_INFO("init begins");
     initThreadFlag = false;
+    sam_client_ = nullptr;
     clearState();
 }
 
@@ -23,6 +24,11 @@ Estimator::~Estimator()
     {
         processThread.join();
         printf("join thread \n");
+    }
+    if (sam_client_ != nullptr)
+    {
+        delete sam_client_;
+        sam_client_ = nullptr;
     }
 }
 
@@ -109,6 +115,29 @@ void Estimator::setParameter()
     g = G;
     cout << "set g " << g.transpose() << endl;
     featureTracker.readIntrinsicParameter(CAM_NAMES);
+    
+    // Initialize SAM if enabled
+    if (USE_SAM)
+    {
+        sam_client_ = new SAMClient();
+        if (sam_client_->isServiceAvailable())
+        {
+            featureTracker.setSAMClient(sam_client_);
+            featureTracker.initSAM(true, SAM_UPDATE_FREQUENCY);
+            ROS_INFO("SAM integration initialized successfully");
+        }
+        else
+        {
+            ROS_WARN("SAM service not available, disabling SAM integration");
+            featureTracker.initSAM(false);
+            delete sam_client_;
+            sam_client_ = nullptr;
+        }
+    }
+    else
+    {
+        featureTracker.initSAM(false);
+    }
 
     std::cout << "MULTIPLE_THREAD is " << MULTIPLE_THREAD << '\n';
     if (MULTIPLE_THREAD && !initThreadFlag)

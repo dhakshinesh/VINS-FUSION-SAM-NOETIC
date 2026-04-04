@@ -64,6 +64,10 @@ extern double F_THRESHOLD;
 extern int SHOW_TRACK;
 extern int FLOW_BACK;
 
+// SAM integration parameters
+extern int USE_SAM;
+extern int SAM_UPDATE_FREQUENCY;
+
 void readParameters(std::string config_file);
 
 enum SIZE_PARAMETERIZATION

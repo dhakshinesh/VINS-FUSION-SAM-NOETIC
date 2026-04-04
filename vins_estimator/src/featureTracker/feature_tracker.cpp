@@ -50,11 +50,31 @@ FeatureTracker::FeatureTracker()
     stereo_cam = 0;
     n_id = 0;
     hasPrediction = false;
+    sam_client_ = nullptr;
+    use_sam_ = false;
+    sam_update_frequency_ = 5;  // Update SAM mask every 5 frames by default
+    frame_count_ = 0;
 }
 
 void FeatureTracker::setMask()
 {
-    mask = cv::Mat(row, col, CV_8UC1, cv::Scalar(255));
+    // Start with SAM mask if available, otherwise use full mask
+    if (use_sam_ && sam_client_ != nullptr && !sam_mask.empty())
+    {
+        // Use SAM mask as base (invert: 255 for valid regions, 0 for masked out)
+        // SAM mask has 255 for segmented regions, we want to detect features there
+        mask = sam_mask.clone();
+    }
+    else
+    {
+        mask = cv::Mat(row, col, CV_8UC1, cv::Scalar(255));
+    }
+
+    // Apply fisheye mask if available
+    if (!fisheye_mask.empty())
+    {
+        cv::bitwise_and(mask, fisheye_mask, mask);
+    }
 
     // prefer to keep features that are tracked for long time
     vector<pair<int, pair<cv::Point2f, int>>> cnt_pts_id;
@@ -99,6 +119,32 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
     row = cur_img.rows;
     col = cur_img.cols;
     cv::Mat rightImg = _img1;
+    
+    // Update SAM mask periodically
+    if (use_sam_ && sam_client_ != nullptr && (frame_count_ % sam_update_frequency_ == 0))
+    {
+        cv::Mat color_img;
+        if (_img.channels() == 1)
+        {
+            cv::cvtColor(_img, color_img, cv::COLOR_GRAY2BGR);
+        }
+        else
+        {
+            color_img = _img.clone();
+        }
+        
+        cv::Mat new_sam_mask;
+        if (sam_client_->getSegmentationMask(color_img, new_sam_mask))
+        {
+            sam_mask = new_sam_mask;
+            ROS_DEBUG("SAM mask updated successfully");
+        }
+        else
+        {
+            ROS_DEBUG("Failed to get SAM mask, using previous mask or default");
+        }
+    }
+    frame_count_++;
     /*
     {
         cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(3.0, cv::Size(8, 8));
@@ -455,6 +501,16 @@ void FeatureTracker::drawTrack(const cv::Mat &imLeft, const cv::Mat &imRight,
         imTrack = imLeft.clone();
     cv::cvtColor(imTrack, imTrack, cv::COLOR_GRAY2RGB);
 
+    // Overlay SAM mask: semi-transparent green where mask = 255 (segmented regions)
+    if (use_sam_ && !sam_mask.empty() && sam_mask.rows == imLeft.rows && sam_mask.cols == imLeft.cols)
+    {
+        cv::Rect left_roi(0, 0, sam_mask.cols, sam_mask.rows);
+        cv::Mat left_part = imTrack(left_roi);
+        cv::Mat green_overlay = cv::Mat::zeros(sam_mask.size(), imTrack.type());
+        green_overlay.setTo(cv::Scalar(0, 255, 0), sam_mask);  // BGR: green where segmented
+        cv::addWeighted(left_part, 1.0, green_overlay, 0.35, 0, left_part);
+    }
+
     for (size_t j = 0; j < curLeftPts.size(); j++)
     {
         double len = std::min(1.0, 1.0 * track_cnt[j] / 20);
@@ -543,4 +599,24 @@ void FeatureTracker::removeOutliers(set<int> &removePtsIds)
 cv::Mat FeatureTracker::getTrackImage()
 {
     return imTrack;
+}
+
+void FeatureTracker::initSAM(bool use_sam, int update_frequency)
+{
+    use_sam_ = use_sam;
+    sam_update_frequency_ = update_frequency;
+    frame_count_ = 0;
+    if (use_sam_)
+    {
+        ROS_INFO("SAM integration enabled with update frequency: %d", sam_update_frequency_);
+    }
+}
+
+void FeatureTracker::setSAMClient(SAMClient* client)
+{
+    sam_client_ = client;
+    if (sam_client_ != nullptr)
+    {
+        ROS_INFO("SAM client set for FeatureTracker");
+    }
 }

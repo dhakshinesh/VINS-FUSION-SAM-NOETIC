@@ -24,6 +24,7 @@
 #include "camodocal/camera_models/PinholeCamera.h"
 #include "../estimator/parameters.h"
 #include "../utility/tic_toc.h"
+#include "../sam_service/sam_client.h"
 
 using namespace std;
 using namespace camodocal;
@@ -58,11 +59,16 @@ public:
     void removeOutliers(set<int> &removePtsIds);
     cv::Mat getTrackImage();
     bool inBorder(const cv::Point2f &pt);
+    
+    // SAM integration methods
+    void initSAM(bool use_sam, int update_frequency = 5);
+    void setSAMClient(SAMClient* client);
 
     int row, col;
     cv::Mat imTrack;
     cv::Mat mask;
     cv::Mat fisheye_mask;
+    cv::Mat sam_mask;  // SAM segmentation mask
     cv::Mat prev_img, cur_img;
     vector<cv::Point2f> n_pts;
     vector<cv::Point2f> predict_pts;
@@ -81,4 +87,11 @@ public:
     bool stereo_cam;
     int n_id;
     bool hasPrediction;
+    
+    // SAM integration
+    SAMClient* sam_client_;
+    bool use_sam_;
+    int sam_update_frequency_;  // Update SAM mask every N frames
+    int frame_count_;
+
 };

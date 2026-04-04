@@ -45,6 +45,8 @@ int MIN_DIST;
 double F_THRESHOLD;
 int SHOW_TRACK;
 int FLOW_BACK;
+int USE_SAM;
+int SAM_UPDATE_FREQUENCY;
 
 
 template <typename T>
@@ -86,6 +88,25 @@ void readParameters(std::string config_file)
     F_THRESHOLD = fsSettings["F_threshold"];
     SHOW_TRACK = fsSettings["show_track"];
     FLOW_BACK = fsSettings["flow_back"];
+
+    // SAM integration parameters (optional, defaults to disabled)
+    if (fsSettings["use_sam"].empty())
+    {
+        USE_SAM = 0;
+    }
+    else
+    {
+        USE_SAM = fsSettings["use_sam"];
+    }
+    
+    if (fsSettings["sam_update_frequency"].empty())
+    {
+        SAM_UPDATE_FREQUENCY = 5;  // Default: update every 5 frames
+    }
+    else
+    {
+        SAM_UPDATE_FREQUENCY = fsSettings["sam_update_frequency"];
+    }
 
     MULTIPLE_THREAD = fsSettings["multiple_thread"];
 

@@ -14,7 +14,9 @@ find_package(catkin REQUIRED COMPONENTS
     tf
     cv_bridge
     camera_models
-    image_transport)
+    image_transport
+    sensor_msgs
+    message_generation)
 
 find_package(OpenCV 4 REQUIRED)
 
@@ -31,7 +33,22 @@ include_directories(
   ${EIGEN3_INCLUDE_DIR}
 )
 
-catkin_package()
+# Generate services
+add_service_files(
+  FILES
+  SAMSegmentation.srv
+)
+
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+)
+
+catkin_package(
+  CATKIN_DEPENDS roscpp std_msgs geometry_msgs nav_msgs tf cv_bridge camera_models image_transport sensor_msgs message_runtime
+)
 
 add_library(vins_lib
     src/estimator/parameters.cpp
@@ -49,7 +66,8 @@ add_library(vins_lib
     src/initial/initial_aligment.cpp
     src/initial/initial_sfm.cpp
     src/initial/initial_ex_rotation.cpp
-    src/featureTracker/feature_tracker.cpp)
+    src/featureTracker/feature_tracker.cpp
+    src/sam_service/sam_client.cpp)
 target_link_libraries(vins_lib ${catkin_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES})
 
 

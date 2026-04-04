@@ -35,6 +35,7 @@
 #include "../factor/projectionTwoFrameTwoCamFactor.h"
 #include "../factor/projectionOneFrameTwoCamFactor.h"
 #include "../featureTracker/feature_tracker.h"
+#include "../sam_service/sam_client.h"
 
 
 class Estimator
@@ -105,6 +106,9 @@ class Estimator
     std::thread processThread;
 
     FeatureTracker featureTracker;
+    
+    // SAM integration
+    SAMClient* sam_client_;
 
     SolverFlag solver_flag;
     MarginalizationFlag  marginalization_flag;
