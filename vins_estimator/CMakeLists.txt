@@ -69,6 +69,7 @@ add_library(vins_lib
     src/featureTracker/feature_tracker.cpp
     src/sam_service/sam_client.cpp)
 target_link_libraries(vins_lib ${catkin_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES})
+add_dependencies(vins_lib ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 
 add_executable(vins_node src/rosNodeTest.cpp)
