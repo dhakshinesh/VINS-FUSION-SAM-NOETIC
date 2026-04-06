@@ -86,6 +86,7 @@ class SAMService:
             
             # Convert BGR to RGB for SAM
             rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+            rgb_image = np.ascontiguousarray(rgb_image, dtype=np.uint8)
             
             if self.use_automatic_mask:
                 # Generate automatic masks
