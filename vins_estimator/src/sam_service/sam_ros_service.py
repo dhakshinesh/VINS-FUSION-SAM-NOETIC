@@ -75,27 +75,44 @@ class SAMService:
         """
         Handle segmentation request
         """
+        def _fail_response():
+            r = SAMSegmentationResponse()
+            r.success = False
+            return r
+
         try:
-            # Convert ROS image to OpenCV
+            # Convert ROS image to OpenCV — log shape/dtype before any failure
             try:
                 gray = self.bridge.imgmsg_to_cv2(req.image, "mono8")
+                rospy.logdebug(f"Received mono8 image: shape={gray.shape}, dtype={gray.dtype}")
                 cv_image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
             except Exception as e:
                 rospy.logerr(f"Image conversion failed: {e}")
-                return
-            
+                return _fail_response()
+
             # Convert BGR to RGB for SAM
             rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
             rgb_image = np.ascontiguousarray(rgb_image, dtype=np.uint8)
-            
+
+            # Validate image before passing to SAM
+            if rgb_image is None or rgb_image.size == 0:
+                rospy.logerr("Image is empty after conversion — skipping segmentation")
+                return _fail_response()
+            if rgb_image.ndim != 3 or rgb_image.shape[2] != 3:
+                rospy.logerr(f"Expected HxWx3 RGB image, got shape={rgb_image.shape} — skipping segmentation")
+                return _fail_response()
+            if rgb_image.dtype != np.uint8:
+                rospy.logerr(f"Expected uint8 image, got dtype={rgb_image.dtype} — skipping segmentation")
+                return _fail_response()
+
+            rospy.logdebug(f"Image ready for SAM: shape={rgb_image.shape}, dtype={rgb_image.dtype}")
+
             if self.use_automatic_mask:
-                # Generate automatic masks
+                # Generate automatic masks — requires valid HxWx3 uint8 RGB image
                 masks = self.mask_generator.generate(rgb_image)
-                
-                # Combine all masks into a single binary mask
-                # Option 1: Union of all masks (all segmented regions)
+
                 combined_mask = np.zeros((rgb_image.shape[0], rgb_image.shape[1]), dtype=np.uint8)
-                
+
                 for mask_data in masks:
                     if isinstance(mask_data['segmentation'], np.ndarray):
                         mask = mask_data['segmentation'].astype(np.uint8) * 255
@@ -104,49 +121,35 @@ class SAMService:
                         from pycocotools import mask as mask_utils
                         mask = mask_utils.decode(mask_data['segmentation']).astype(np.uint8) * 255
                     combined_mask = np.maximum(combined_mask, mask)
-                
-                # Option 2: Use only high-quality masks (uncomment to use)
-                # combined_mask = np.zeros((rgb_image.shape[0], rgb_image.shape[1]), dtype=np.uint8)
-                # for mask_data in masks:
-                #     if mask_data['stability_score'] > 0.9 and mask_data['predicted_iou'] > 0.9:
-                #         if isinstance(mask_data['segmentation'], np.ndarray):
-                #             mask = mask_data['segmentation'].astype(np.uint8) * 255
-                #         else:
-                #             from pycocotools import mask as mask_utils
-                #             mask = mask_utils.decode(mask_data['segmentation']).astype(np.uint8) * 255
-                #         combined_mask = np.maximum(combined_mask, mask)
-                
+
             else:
-                # Use predictor with points (if provided)
+                # set_image must always be called before any predict() call
+                self.predictor.set_image(rgb_image)
+                combined_mask = np.zeros((rgb_image.shape[0], rgb_image.shape[1]), dtype=np.uint8)
+
                 if len(req.points) > 0:
-                    self.predictor.set_image(rgb_image)
                     points = np.array([[p.x, p.y] for p in req.points])
                     labels = np.ones(len(points))  # All foreground points
-                    
+
                     masks, scores, _ = self.predictor.predict(
                         point_coords=points,
                         point_labels=labels,
                         multimask_output=False
                     )
                     combined_mask = masks[0].astype(np.uint8) * 255
-                else:
-                    # No points provided, return empty mask
-                    combined_mask = np.zeros((rgb_image.shape[0], rgb_image.shape[1]), dtype=np.uint8)
-            
+
             # Convert mask to ROS image message
             mask_msg = self.bridge.cv2_to_imgmsg(combined_mask, encoding="mono8")
-            
+
             response = SAMSegmentationResponse()
             response.mask = mask_msg
             response.success = True
-            
+
             return response
-            
+
         except Exception as e:
             rospy.logerr(f"Error in segmentation: {str(e)}")
-            response = SAMSegmentationResponse()
-            response.success = False
-            return response
+            return _fail_response()
     
     def run(self):
         rospy.spin()

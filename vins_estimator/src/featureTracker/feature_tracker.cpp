@@ -54,6 +54,9 @@ FeatureTracker::FeatureTracker()
     use_sam_ = false;
     sam_update_frequency_ = 5;  // Update SAM mask every 5 frames by default
     frame_count_ = 0;
+    // IMU-GATE: Initialize gate state
+    skip_sam_this_frame_ = false;
+    imu_warp_rotation_ = Matrix3d::Identity();
 }
 
 void FeatureTracker::setMask()
@@ -120,30 +123,78 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
     col = cur_img.cols;
     cv::Mat rightImg = _img1;
     
-    // Update SAM mask periodically
-    if (use_sam_ && sam_client_ != nullptr && (frame_count_ % sam_update_frequency_ == 0))
+    // IMU-GATE: Check if this frame was blocked by IMU gate
+    if (skip_sam_this_frame_ && !last_good_mask_.empty())
     {
-        cv::Mat color_img;
-        if (_img.channels() == 1)
+        // IMU-GATE: Warp previous mask using IMU rotation instead of running SAM
+        // Get image center for rotation
+        cv::Point2f center(last_good_mask_.cols / 2.0f,
+                           last_good_mask_.rows / 2.0f);
+
+        // Convert IMU relative rotation to a 2D affine warp.
+        // We use only the yaw component for in-plane rotation and
+        // approximate pan/tilt as image translation.
+        Eigen::AngleAxisd aa(imu_warp_rotation_);
+        Eigen::Vector3d axis = aa.axis();
+        double angle = aa.angle();
+
+        // Yaw (rotation around Z/optical axis) → image rotation
+        double yaw_deg = axis(2) * angle * 180.0 / M_PI;
+
+        // Pitch/roll → approximate as vertical/horizontal shift
+        // Using simplified pinhole: pixel_shift = f * angle_rad
+        // Focal length approximation: use mask width as proxy
+        double f_approx = last_good_mask_.cols;
+        double dx = -axis(0) * angle * f_approx;  // pan → horizontal shift
+        double dy = -axis(1) * angle * f_approx;  // tilt → vertical shift
+
+        // Build 2D rotation + translation warp matrix
+        cv::Mat warp = cv::getRotationMatrix2D(center, yaw_deg, 1.0);
+        warp.at<double>(0, 2) += dx;
+        warp.at<double>(1, 2) += dy;
+
+        // Apply warp to last good mask
+        cv::Mat warped_mask;
+        cv::warpAffine(last_good_mask_, warped_mask, warp,
+                       last_good_mask_.size(), cv::INTER_NEAREST);
+
+        // Use warped mask instead of SAM output
+        sam_mask = warped_mask;
+        ROS_DEBUG("IMU-GATE: Using IMU-warped mask (yaw=%.2f deg, "
+                  "dx=%.1fpx, dy=%.1fpx)", yaw_deg, dx, dy);
+    }
+    else if (!skip_sam_this_frame_)
+    {
+        // IMU-GATE: Frame is clean — run SAM normally (subject to update frequency)
+        if (use_sam_ && sam_client_ != nullptr && (frame_count_ % sam_update_frequency_ == 0))
         {
-            cv::cvtColor(_img, color_img, cv::COLOR_GRAY2BGR);
-        }
-        else
-        {
-            color_img = _img.clone();
-        }
-        
-        cv::Mat new_sam_mask;
-        if (sam_client_->getSegmentationMask(color_img, new_sam_mask))
-        {
-            sam_mask = new_sam_mask;
-            ROS_DEBUG("SAM mask updated successfully");
-        }
-        else
-        {
-            ROS_DEBUG("Failed to get SAM mask, using previous mask or default");
+            cv::Mat color_img;
+            if (_img.channels() == 1)
+            {
+                cv::cvtColor(_img, color_img, cv::COLOR_GRAY2BGR);
+            }
+            else
+            {
+                color_img = _img.clone();
+            }
+
+            cv::Mat new_sam_mask;
+            if (sam_client_->getSegmentationMask(color_img, new_sam_mask))
+            {
+                sam_mask = new_sam_mask;
+                // IMU-GATE: Save result as last good mask for future warping
+                last_good_mask_ = sam_mask.clone();
+                ROS_DEBUG("SAM mask updated successfully");
+            }
+            else
+            {
+                ROS_DEBUG("Failed to get SAM mask, using previous mask or default");
+            }
         }
     }
+
+    // IMU-GATE: Reset skip flag after use
+    skip_sam_this_frame_ = false;
     frame_count_++;
     /*
     {

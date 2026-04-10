@@ -64,6 +64,10 @@ public:
     void initSAM(bool use_sam, int update_frequency = 5);
     void setSAMClient(SAMClient* client);
 
+    // IMU-GATE: Gate control methods
+    void skipSAMThisFrame(bool skip) { skip_sam_this_frame_ = skip; }
+    void setIMUWarpRotation(const Matrix3d& R) { imu_warp_rotation_ = R; }
+
     int row, col;
     cv::Mat imTrack;
     cv::Mat mask;
@@ -93,5 +97,10 @@ public:
     bool use_sam_;
     int sam_update_frequency_;  // Update SAM mask every N frames
     int frame_count_;
+
+    // IMU-GATE: Gate control variables
+    bool skip_sam_this_frame_;       // if true, skip SAM and use warped mask
+    Matrix3d imu_warp_rotation_;     // rotation to warp previous mask by
+    cv::Mat last_good_mask_;         // last mask SAM produced successfully
 
 };

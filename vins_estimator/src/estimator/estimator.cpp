@@ -95,6 +95,13 @@ void Estimator::clearState()
 
     failure_occur = 0;
 
+    // IMU-GATE: Initialize gate state
+    imu_uncertainty = 0.0;
+    sam_gate_active = false;
+    last_good_Rs = Matrix3d::Identity();
+    frames_blocked_by_gate = 0;
+    frames_processed_by_sam = 0;
+
     mProcess.unlock();
 }
 
@@ -461,6 +468,60 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     imageframe.pre_integration = tmp_pre_integration;
     all_image_frame.insert(make_pair(header, imageframe));
     tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
+
+    // IMU-GATE: Compute rotation uncertainty from preintegration covariance
+    static const double IMU_COV_THRESHOLD = 1e-3;
+    imu_uncertainty = 0.0;
+    if (frame_count > 0 && pre_integrations[frame_count] != nullptr)
+    {
+        imu_uncertainty = pre_integrations[frame_count]
+                          ->covariance.block<3,3>(0,0).trace();
+    }
+    ROS_DEBUG("IMU-GATE: rotation uncertainty = %f (threshold = %f)",
+              imu_uncertainty, IMU_COV_THRESHOLD);
+
+    // IMU-GATE: Gate decision — block SAM if uncertainty too high
+    sam_gate_active = (imu_uncertainty > IMU_COV_THRESHOLD) &&
+                      (frame_count > 0);
+
+    if (sam_gate_active)
+    {
+        frames_blocked_by_gate++;
+        ROS_WARN("IMU-GATE: BLOCKED frame %d — uncertainty %f exceeds "
+                 "threshold %f. Total blocked: %d / %d",
+                 frame_count, imu_uncertainty, IMU_COV_THRESHOLD,
+                 frames_blocked_by_gate,
+                 frames_blocked_by_gate + frames_processed_by_sam);
+
+        // IMU-GATE: Warp last good mask using IMU relative rotation
+        // R_rel = last_good_Rs.transpose() * Rs[frame_count]
+        // This rotation tells us how the camera moved since last good frame
+        Matrix3d R_rel = last_good_Rs.transpose() * Rs[frame_count];
+        featureTracker.setIMUWarpRotation(R_rel);
+        featureTracker.skipSAMThisFrame(true);
+    }
+    else
+    {
+        frames_processed_by_sam++;
+        // IMU-GATE: Frame is clean, let SAM run normally
+        // Update last good rotation for future warping
+        last_good_Rs = Rs[frame_count];
+        featureTracker.skipSAMThisFrame(false);
+        ROS_DEBUG("IMU-GATE: ALLOWED frame %d — uncertainty %f is clean",
+                  frame_count, imu_uncertainty);
+    }
+
+    // IMU-GATE: Periodic summary
+    if ((frames_blocked_by_gate + frames_processed_by_sam) % 50 == 0 &&
+        (frames_blocked_by_gate + frames_processed_by_sam) > 0)
+    {
+        int total = frames_blocked_by_gate + frames_processed_by_sam;
+        ROS_INFO("IMU-GATE SUMMARY: %d/%d frames blocked (%.1f%%), "
+                 "current uncertainty: %f",
+                 frames_blocked_by_gate, total,
+                 100.0 * frames_blocked_by_gate / total,
+                 imu_uncertainty);
+    }
 
     if(ESTIMATE_EXTRINSIC == 2)
     {

@@ -81,6 +81,14 @@ class Estimator
     bool IMUAvailable(double t);
     void initFirstIMUPose(vector<pair<double, Eigen::Vector3d>> &accVector);
 
+    // IMU-GATE: Exposes uncertainty score for external monitoring
+    double getIMUUncertainty() const { return imu_uncertainty; }
+    bool isSAMGateActive() const { return sam_gate_active; }
+    void getGateStats(int &blocked, int &processed) const {
+        blocked = frames_blocked_by_gate;
+        processed = frames_processed_by_sam;
+    }
+
     enum SolverFlag
     {
         INITIAL,
@@ -109,6 +117,13 @@ class Estimator
     
     // SAM integration
     SAMClient* sam_client_;
+
+    // IMU-GATE: IMU-gated SAM memory management state
+    double imu_uncertainty;           // current IMU rotation uncertainty score
+    bool sam_gate_active;             // true if this frame was blocked by gate
+    Matrix3d last_good_Rs;            // rotation at last frame SAM ran successfully
+    int frames_blocked_by_gate;       // counter for how many frames were blocked
+    int frames_processed_by_sam;      // counter for how many frames SAM ran on
 
     SolverFlag solver_flag;
     MarginalizationFlag  marginalization_flag;
